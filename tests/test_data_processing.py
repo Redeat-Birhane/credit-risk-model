@@ -5,7 +5,8 @@ from src.data_processing import (
     build_feature_pipeline,
     apply_woe,
     build_numeric_pipeline,
-    get_iv_table
+    get_iv_table,
+    assign_high_risk_label
 )
 
 # =========================
@@ -50,3 +51,8 @@ X_test_final = num_pipe.transform(X_test_woe)
 iv = get_iv_table(X_train_woe, y_train)
 
 print(iv.sort_values("IV", ascending=False))
+
+df_labeled, rfm, model = assign_high_risk_label(df)
+
+print(df_labeled[["CustomerId", "is_high_risk"]].head())
+print(df_labeled["is_high_risk"].value_counts())

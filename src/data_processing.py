@@ -7,7 +7,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 from xverse.transformer import WOE
 
 
@@ -214,7 +215,63 @@ def compute_iv_table(df, target):
 def get_iv_table(df, target):
     return compute_iv_table(df, target)
 
+# RFM Feature Builder
+def compute_rfm(df, snapshot_date=None):
+    df = df.copy()
 
+    # ensure datetime
+    df["TransactionStartTime"] = pd.to_datetime(df["TransactionStartTime"])
+
+    # snapshot date (fixed for reproducibility)
+    if snapshot_date is None:
+        snapshot_date = df["TransactionStartTime"].max()
+
+    rfm = df.groupby("CustomerId").agg(
+        Recency=("TransactionStartTime", lambda x: (snapshot_date - x.max()).days),
+        Frequency=("TransactionId", "count"),
+        Monetary=("Amount", "sum")
+    ).reset_index()
+
+    return rfm
+
+# Clustering + Risk Label
+
+def assign_high_risk_label(df, n_clusters=3, random_state=42):
+    df = df.copy()
+
+    # STEP 1: RFM
+    rfm = compute_rfm(df)
+
+    features = rfm[["Recency", "Frequency", "Monetary"]]
+
+    # STEP 2: scaling (VERY IMPORTANT)
+    scaler = StandardScaler()
+    rfm_scaled = scaler.fit_transform(features)
+
+    # STEP 3: KMeans clustering
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    rfm["cluster"] = kmeans.fit_predict(rfm_scaled)
+
+    # STEP 4: identify high-risk cluster
+    cluster_profile = rfm.groupby("cluster")[["Recency", "Frequency", "Monetary"]].mean()
+
+    # heuristic: high recency + low frequency + low monetary
+    risk_cluster = cluster_profile.sort_values(
+        by=["Frequency", "Monetary", "Recency"],
+        ascending=[True, True, False]
+    ).index[0]
+
+    # STEP 5: label
+    rfm["is_high_risk"] = (rfm["cluster"] == risk_cluster).astype(int)
+
+    # STEP 6: merge back
+    df = df.merge(
+        rfm[["CustomerId", "is_high_risk"]],
+        on="CustomerId",
+        how="left"
+    )
+
+    return df, rfm, kmeans
 # =========================
 # ACCESSORS
 # =========================

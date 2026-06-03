@@ -56,3 +56,23 @@ df_labeled, rfm, model = assign_high_risk_label(df)
 
 print(df_labeled[["CustomerId", "is_high_risk"]].head())
 print(df_labeled["is_high_risk"].value_counts())
+
+def test_feature_pipeline_output():
+    df = pd.read_csv("data/raw/data.csv").head(50)
+
+    X = df.drop(columns=["FraudResult"], errors="ignore")
+
+    pipe = build_feature_pipeline()
+    X_out = pipe.fit_transform(X)
+
+    assert X_out is not None
+    assert X_out.shape[0] == X.shape[0]
+
+
+def test_risk_label_creation():
+    df = pd.read_csv("data/raw/data.csv").head(50)
+
+    df_labeled, _, _ = assign_high_risk_label(df)
+
+    assert "is_high_risk" in df_labeled.columns
+    assert df_labeled["is_high_risk"].isin([0, 1]).all()

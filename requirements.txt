@@ -1,44 +1,26 @@
-# Core ML
-pandas==2.0.3
-numpy==1.24.3
-scikit-learn==1.3.0
-scipy==1.11.1
-
-# Visualization
-matplotlib==3.7.2
-seaborn==0.12.2
-plotly==5.15.0
-streamlit==1.25.0
-
-# Model Explainability
-shap==0.42.1
-lime==0.2.0.1
-
-# Experiment Tracking
-mlflow==2.5.0
-
-# API & Web
-fastapi==0.100.1
-uvicorn==0.23.2
-pydantic==2.3.0
-python-multipart==0.0.6
-
-# Utilities
-joblib==1.3.1
-python-dotenv==1.0.0
-pathlib==1.0.1
-
-# Testing
-pytest==7.4.0
-pytest-cov==4.1.0
-pytest-mock==3.11.1
-
-# Code Quality
-black==23.7.0
-flake8==6.1.0
-mypy==1.4.1
-isort==5.12.0
-
-# Deployment
-docker==6.1.3
-gunicorn==21.2.0
+numpy
+pandas
+scikit-learn
+scipy
+matplotlib
+seaborn
+plotly
+streamlit
+shap
+lime
+mlflow
+fastapi
+uvicorn
+pydantic
+python-multipart
+joblib
+python-dotenv
+pytest
+pytest-cov
+pytest-mock
+black
+flake8
+mypy
+isort
+docker
+gunicorn

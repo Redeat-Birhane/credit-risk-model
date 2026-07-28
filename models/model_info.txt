@@ -1,0 +1,5 @@
+Model Type: gradient_boosting
+Features: 21
+Training Samples: 76,529
+F1 Score: 0.6809
+ROC AUC: 0.9483

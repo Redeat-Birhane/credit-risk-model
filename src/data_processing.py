@@ -1,282 +1,211 @@
-# Aggregate Features Transformer
+"""
+Data processing module for credit risk modeling.
+Handles loading, cleaning, and feature engineering.
+"""
+
 import pandas as pd
 import numpy as np
-from category_encoders import WOEEncoder
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from xverse.transformer import WOE
+from typing import Tuple, Optional, Dict, List, Union
+from pathlib import Path
 
 
-# =========================
-# FEATURE ENGINEERING
-# =========================
-class AggregateFeaturesTransformer(BaseEstimator, TransformerMixin):
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        X = X.copy()
-
-        agg = X.groupby("CustomerId").agg(
-            TotalTransactionAmount=("Amount", "sum"),
-            AverageTransactionAmount=("Amount", "mean"),
-            TransactionCount=("TransactionId", "count"),
-            StdTransactionAmount=("Amount", "std"),
-        ).reset_index()
-
-        agg["StdTransactionAmount"] = agg["StdTransactionAmount"].fillna(0)
-
-        return X.merge(agg, on="CustomerId", how="left")
-
-
-# =========================
-# DATETIME FEATURES
-# =========================
-class DateTimeFeaturesTransformer(BaseEstimator, TransformerMixin):
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        X = X.copy()
-
-        X["TransactionStartTime"] = pd.to_datetime(X["TransactionStartTime"])
-
-        X["TransactionHour"] = X["TransactionStartTime"].dt.hour
-        X["TransactionDay"] = X["TransactionStartTime"].dt.day
-        X["TransactionMonth"] = X["TransactionStartTime"].dt.month
-        X["TransactionYear"] = X["TransactionStartTime"].dt.year
-
-        return X
-
-
-# =========================
-# DROP COLUMNS
-# =========================
-class DropColumnsTransformer(BaseEstimator, TransformerMixin):
-
-    def __init__(self, columns=None):
-        self.columns = columns
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        return X.drop(columns=self.columns, errors="ignore")
-
-
-# =========================
-# COLUMN DEFINITIONS
-# =========================
-NUMERIC_FEATURES = [
-    "CountryCode",
-    "Amount",
-    "Value",
-    "PricingStrategy",
-    "TotalTransactionAmount",
-    "AverageTransactionAmount",
-    "TransactionCount",
-    "StdTransactionAmount",
-    "TransactionHour",
-    "TransactionDay",
-    "TransactionMonth",
-    "TransactionYear",
-]
-
-CATEGORICAL_FEATURES = [
-    "ProviderId",
-    "ProductId",
-    "ProductCategory",
-    "ChannelId",
-    "CurrencyCode"
-]
-
-DROP_COLUMNS = [
-    "TransactionId",
-    "BatchId",
-    "AccountId",
-    "SubscriptionId",
-    "CustomerId",
-    "TransactionStartTime"
-]
-
-
-# =========================
-# PIPELINE BUILDERS
-# =========================
-numeric_pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler())
-])
-
-categorical_pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("encoder", OneHotEncoder(handle_unknown="ignore"))
-])
-
-
-preprocessor = ColumnTransformer([
-    ("num", numeric_pipeline, NUMERIC_FEATURES),
-    ("cat", categorical_pipeline, CATEGORICAL_FEATURES)
-])
-
-
-def build_feature_pipeline():
-    return Pipeline(steps=[
-        ("aggregate", AggregateFeaturesTransformer()),
-        ("datetime", DateTimeFeaturesTransformer()),
-        ("drop", DropColumnsTransformer(columns=DROP_COLUMNS)),
-    ])
-
-
-
-
-def apply_woe(X_train, X_test, y_train):
-    X_train = X_train.copy()
-    X_test = X_test.copy()
-
-    # STEP 1: ensure all columns are usable by encoder
-    for col in X_train.columns:
-        if not pd.api.types.is_numeric_dtype(X_train[col]):
-            X_train[col] = X_train[col].astype(str)
-
-    for col in X_test.columns:
-        if not pd.api.types.is_numeric_dtype(X_test[col]):
-            X_test[col] = X_test[col].astype(str)
-
-    # STEP 2: align columns
-    X_test = X_test.reindex(columns=X_train.columns, fill_value=0)
-
-    # STEP 3: WOE encoding (stable implementation)
-    woe = WOEEncoder(cols=X_train.columns)
-
-    X_train_woe = woe.fit_transform(X_train, y_train)
-    X_test_woe = woe.transform(X_test)
-
-    return X_train_woe, X_test_woe, woe
-
+def load_data(file_path: Union[str, Path]) -> pd.DataFrame:
+    """
+    Load credit risk dataset from CSV file.
     
+    Args:
+        file_path: Path to the CSV file
+        
+    Returns:
+        pd.DataFrame: Loaded dataset
+        
+    Raises:
+        FileNotFoundError: If the file doesn't exist
+        pd.errors.EmptyDataError: If the file is empty
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Data file not found: {file_path}")
+    
+    return pd.read_csv(file_path)
 
 
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Perform initial data cleaning operations.
+    
+    Args:
+        df: Raw dataframe
+        
+    Returns:
+        pd.DataFrame: Cleaned dataframe with no missing values
+    """
+    # Remove duplicates
+    df = df.drop_duplicates()
+    
+    # Handle missing values
+    df = df.fillna(df.median(numeric_only=True))
+    
+    return df
 
 
+def engineer_features(
+    df: pd.DataFrame,
+    categorical_columns: Optional[List[str]] = None,
+    scale_numeric: bool = True
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Engineer features for credit risk modeling.
+    
+    Args:
+        df: Cleaned dataframe
+        categorical_columns: List of categorical column names to encode
+        scale_numeric: Whether to standardize numeric features
+        
+    Returns:
+        Tuple[pd.DataFrame, pd.Series]: Feature matrix and target variable
+        
+    Raises:
+        ValueError: If target column 'default' is not found
+    """
+    # Ensure target exists
+    if 'default' not in df.columns:
+        raise ValueError("Target column 'default' not found in dataset")
+    
+    # Separate features and target
+    X = df.drop(columns=['default'])
+    y = df['default']
+    
+    # Encode categorical variables if specified
+    if categorical_columns:
+        X = pd.get_dummies(X, columns=categorical_columns, drop_first=True)
+    
+    # Scale numeric features (optional)
+    if scale_numeric:
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        numeric_cols = X.select_dtypes(include=[np.number]).columns
+        X[numeric_cols] = scaler.fit_transform(X[numeric_cols])
+    
+    return X, y
 
-# =========================
-# IV TABLE
-# =========================
 
-
-def compute_iv(df, feature, target):
-    eps = 0.0001
-
-    temp = pd.DataFrame()
-    temp["feature"] = df[feature]
-    temp["target"] = target.values
-
-    grouped = temp.groupby("feature")["target"].agg(["count", "sum"])
-    grouped.columns = ["total", "bad"]
-
-    grouped["good"] = grouped["total"] - grouped["bad"]
-
-    grouped["bad_dist"] = grouped["bad"] / grouped["bad"].sum()
-    grouped["good_dist"] = grouped["good"] / grouped["good"].sum()
-
-    grouped["woe"] = np.log((grouped["good_dist"] + eps) / (grouped["bad_dist"] + eps))
-
-    grouped["iv"] = (grouped["good_dist"] - grouped["bad_dist"]) * grouped["woe"]
-
-    return grouped["iv"].sum()
-
-
-
-
-def compute_iv_table(df, target):
-    iv_list = []
-
-    for col in df.columns:
-        if col == target.name if hasattr(target, "name") else None:
-            continue
-
-        try:
-            iv = compute_iv(df, col, target)
-            iv_list.append((col, iv))
-        except:
-            continue
-
-    return pd.DataFrame(iv_list, columns=["feature", "IV"]).sort_values(
-        by="IV", ascending=False
+def split_data(
+    X: pd.DataFrame,
+    y: pd.Series,
+    test_size: float = 0.2,
+    random_state: int = 42
+) -> Dict[str, Union[pd.DataFrame, pd.Series]]:
+    """
+    Split data into train and test sets.
+    
+    Args:
+        X: Feature matrix
+        y: Target variable
+        test_size: Proportion of data for testing (default: 0.2)
+        random_state: Random seed for reproducibility
+        
+    Returns:
+        Dict containing X_train, X_test, y_train, y_test
+    """
+    from sklearn.model_selection import train_test_split
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=y
     )
-def get_iv_table(df, target):
-    return compute_iv_table(df, target)
+    
+    return {
+        'X_train': X_train,
+        'X_test': X_test,
+        'y_train': y_train,
+        'y_test': y_test
+    }
 
-# RFM Feature Builder
-def compute_rfm(df, snapshot_date=None):
-    df = df.copy()
 
-    # ensure datetime
-    df["TransactionStartTime"] = pd.to_datetime(df["TransactionStartTime"])
+def calculate_woe_iv(
+    df: pd.DataFrame,
+    feature: str,
+    target: str = 'default',
+    bins: int = 10
+) -> Tuple[pd.DataFrame, float, float]:
+    """
+    Calculate Weight of Evidence (WoE) and Information Value (IV).
+    
+    Args:
+        df: DataFrame containing feature and target
+        feature: Feature column name
+        target: Target column name (binary, 0/1)
+        bins: Number of bins for continuous features
+        
+    Returns:
+        Tuple[pd.DataFrame, float, float]: 
+            - DataFrame with bin statistics
+            - WoE values for each bin
+            - Information Value
+        
+    Raises:
+        ValueError: If target values are not 0 or 1
+    """
+    # Validate target
+    if not set(df[target].unique()).issubset({0, 1}):
+        raise ValueError("Target must be binary (0 and 1)")
+    
+    # Create bins
+    df_binned = df.copy()
+    if df[feature].dtype in ['int64', 'float64']:
+        df_binned['bin'] = pd.qcut(df[feature], q=bins, duplicates='drop')
+    else:
+        df_binned['bin'] = df[feature]
+    
+    # Calculate WoE and IV
+    grouped = df_binned.groupby('bin')[target].agg(['count', 'sum'])
+    grouped['non_events'] = grouped['count'] - grouped['sum']
+    
+    total_events = grouped['sum'].sum()
+    total_non_events = grouped['non_events'].sum()
+    
+    grouped['dist_events'] = grouped['sum'] / total_events
+    grouped['dist_non_events'] = grouped['non_events'] / total_non_events
+    
+    # WoE calculation
+    grouped['woe'] = np.log(
+        grouped['dist_events'] / grouped['dist_non_events']
+    ).replace([np.inf, -np.inf], 0)
+    
+    # IV calculation
+    grouped['iv'] = (
+        grouped['dist_events'] - grouped['dist_non_events']
+    ) * grouped['woe']
+    
+    iv = grouped['iv'].sum()
+    
+    return grouped, grouped['woe'].values, iv
 
-    # snapshot date (fixed for reproducibility)
-    if snapshot_date is None:
-        snapshot_date = df["TransactionStartTime"].max()
 
-    rfm = df.groupby("CustomerId").agg(
-        Recency=("TransactionStartTime", lambda x: (snapshot_date - x.max()).days),
-        Frequency=("TransactionId", "count"),
-        Monetary=("Amount", "sum")
-    ).reset_index()
+# Example of dataclass for configuration
+from dataclasses import dataclass
+from typing import Optional
 
-    return rfm
 
-# Clustering + Risk Label
-
-def assign_high_risk_label(df, n_clusters=3, random_state=42):
-    df = df.copy()
-
-    # STEP 1: RFM
-    rfm = compute_rfm(df)
-
-    features = rfm[["Recency", "Frequency", "Monetary"]]
-
-    # STEP 2: scaling (VERY IMPORTANT)
-    scaler = StandardScaler()
-    rfm_scaled = scaler.fit_transform(features)
-
-    # STEP 3: KMeans clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-    rfm["cluster"] = kmeans.fit_predict(rfm_scaled)
-
-    # STEP 4: identify high-risk cluster
-    cluster_profile = rfm.groupby("cluster")[["Recency", "Frequency", "Monetary"]].mean()
-
-    # heuristic: high recency + low frequency + low monetary
-    risk_cluster = cluster_profile.sort_values(
-        by=["Frequency", "Monetary", "Recency"],
-        ascending=[True, True, False]
-    ).index[0]
-
-    # STEP 5: label
-    rfm["is_high_risk"] = (rfm["cluster"] == risk_cluster).astype(int)
-
-    # STEP 6: merge back
-    df = df.merge(
-        rfm[["CustomerId", "is_high_risk"]],
-        on="CustomerId",
-        how="left"
-    )
-
-    return df, rfm, kmeans
-# =========================
-# ACCESSORS
-# =========================
-def build_numeric_pipeline():
-    return numeric_pipeline
-
-def build_pipeline():
-    return build_feature_pipeline()
+@dataclass
+class ModelConfig:
+    """Configuration for credit risk model."""
+    
+    # Data parameters
+    data_path: str = "data/raw/credit_data.csv"
+    test_size: float = 0.2
+    random_state: int = 42
+    
+    # Model parameters
+    model_type: str = "logistic_regression"  # or "gradient_boosting"
+    max_iter: int = 1000
+    regularization: str = "l2"
+    C: float = 1.0
+    
+    # Training parameters
+    cv_folds: int = 5
+    scoring_metric: str = "roc_auc"
+    
+    # MLflow tracking
+    experiment_name: str = "credit_risk_model"
+    run_name: Optional[str] = None
